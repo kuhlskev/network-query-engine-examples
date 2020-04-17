@@ -119,66 +119,71 @@ dataset = api.query(args.snapshotId, query)
 # Exclude devices in "backup mode"
 devicesInBackupOpMode = ["atl-edge-fw02"]
 
-# create dicionary by vrf with IP as the key and a list of "locations", which is a tuple of device, interface
+# create dicionary by vrf with IP as the key and a list of "locations",
+# which is a tuple of device, interface
 '''
 { 'vrf': {
   'name': 'somevrf'
   'ips' : {'1.1.1.1': [('device', 'interface')]}
 }
-then loop through vrf's and look for ips with len more than 1 to build violations list
+then loop through vrf's and look for ips with len > 1 to build violations list
 '''
 
-vrf_ip_dict = {}
-violations = []
+vrfIpDict = {}
+v = []
 for device in dataset['devices']:
-  devName = device['name']
-  if not (devName in devicesInBackupOpMode):  #devices in backup mode have duplicate IPs intentionally
-    for vrf in device['networkInstances']:
-      vrf_ip_dict.setdefault(vrf['name'], {'name':vrf['name'],'ips':{} })
-      for ints in vrf['interfaces']:
-        # iface goes to the root IP interfaces, like tunnel, bridge, SVI
-        # subIface goes to the subinterfaces
-        if ints['iface']['adminStatus'] =='UP':  #ignore interfaces that are disabled
-          intname = ints['iface']['name']
-        # logic to grab the right interface 
-                # None means its not that int type
-                # subinterfaces could be disabled, dont collect that as a conflict
-          if ints['subIface'] != None:
-            if ints['subIface']['adminStatus'] == 'UP':
-              intvalue = ints['subIface']
-              intname = ints['subIface']['name']
-            else:
-              continue  # subint is down so head to next interface
-          elif ints['iface']['bridge'] != None:
-            intvalue =  ints['iface']['bridge']
-          elif ints['iface']['routedVlan'] != None:
-            intvalue =  ints['iface']['routedVlan']
-          elif ints['iface']['tunnel'] != None:
-            intvalue =  ints['iface']['tunnel']
-          else:
-              continue  # its an interface with no IP, like a switchport
-          for ip in intvalue['ipv4']['addresses']:
-             # if the IP doesnt have an entry, create one, then add entry
-            vrf_ip_dict[vrf['name']]['ips'].setdefault(ip['ip'], [])
-            vrf_ip_dict[vrf['name']]['ips'][ip['ip']].insert(0,(device['name'], intname))
-            if  len(vrf_ip_dict[vrf['name']]['ips'][ip['ip']]) >1:
-              # or should we remove duplicates of the same interface only into violations?
-                violations.insert(0,{'ip':ip['ip'], 'vrf': vrf['name'], 'locations': vrf_ip_dict[vrf['name']]['ips'][ip['ip']]})
-          # how to add logic for fhrp
-          for ip in intvalue['ipv4']['fhrpAddresses']:
-            vrf_ip_dict[vrf['name']]['ips'].setdefault(ip['ip'], [])
-            vrf_ip_dict[vrf['name']]['ips'][ip['ip']].insert(0,(device['name'], intname))
-            if  len(vrf_ip_dict[vrf['name']]['ips'][ip['ip']]) >2:
-              # how to remove fhrp from violations? is greater than 2 enough?  Note - not verifiying both in same fhrp peering
-                violations.insert(0,{'ip':ip['ip'], 'vrf': vrf['name'], 'locations': vrf_ip_dict[vrf['name']]['ips'][ip['ip']]})
+    devName = device['name']
+    # devices in backup mode have duplicate IPs intentionally
+    if not (devName in devicesInBackupOpMode):
+        for vrf in device['networkInstances']:
+            vrfIpDict.setdefault(vrf['name'],
+                                 {'name': vrf['name'], 'ips': {}})
+            for ints in vrf['interfaces']:
+                # iface goes to the root IP interfaces - tunnel/bridge/SVI
+                # subIface goes to the subinterfaces
+                # ignore disabled interfaces
+                if ints['iface']['adminStatus'] == 'UP':
+                    intname = ints['iface']['name']
+                    # logic to grab the right interface
+                    # None means its not that int type
+                    # subinterfaces could be disabled, dont collect
+                    if ints['subIface'] is not None:
+                        if ints['subIface']['adminStatus'] == 'UP':
+                            intvalue = ints['subIface']
+                            intname = ints['subIface']['name']
+                        else:
+                            continue  # subint is down so head to next int
+                    elif ints['iface']['bridge'] is not None:
+                        intvalue = ints['iface']['bridge']
+                    elif ints['iface']['routedVlan'] is not None:
+                        intvalue = ints['iface']['routedVlan']
+                    elif ints['iface']['tunnel'] is not None:
+                        intvalue = ints['iface']['tunnel']
+                    else:
+                        continue  # its an int with no IP, like a switchport
+                    for ip in intvalue['ipv4']['addresses']:
+                        # if the IP has no entry, create one, then add entry
+                        vrfIpDict[vrf['name']]['ips'].setdefault(ip['ip'], [])
+                        vrfIpDict[vrf['name']]['ips'][ip['ip']].insert(0, (device['name'], intname))
+                        if len(vrfIpDict[vrf['name']]['ips'][ip['ip']]) > 1:
+                            v.insert(0, {'ip': ip['ip'], 'vrf': vrf['name'],
+                                     'locations': vrfIpDict[vrf['name']]['ips'][ip['ip']]})
+                    # how to add logic for fhrp
+                    for ip in intvalue['ipv4']['fhrpAddresses']:
+                        vrfIpDict[vrf['name']]['ips'].setdefault(ip['ip'], [])
+                        vrfIpDict[vrf['name']]['ips'][ip['ip']].insert(0, (device['name'], intname))
+                        if len(vrfIpDict[vrf['name']]['ips'][ip['ip']]) > 2:
+                            # how to remove fhrp from violations?
+                            # is greater than 2 enough?
+                            # Note - not verifiying both in same fhrp peering
+                            v.insert(0, {'ip': ip['ip'], 'vrf': vrf['name'],
+                                     'locations': vrfIpDict[vrf['name']]['ips'][ip['ip']]})
 
-#end of my stuff
-
-if not violations:
+if not v:
     print ("OK")
 else:
     print ("Found the following IP uniqueness violations:")
-    printTable (
+    printTable(
       ["VRF", "Subnet", "Interfaces"],
-      [(vio['vrf'], vio['ip'], [d + ":" + i for (d,i) in vio['locations']]) for vio in violations])
-
+      [(vio['vrf'], vio['ip'], [d + ":" + i for (d, i) in vio['locations']])
+          for vio in v])
