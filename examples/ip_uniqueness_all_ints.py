@@ -173,8 +173,6 @@ for device in dataset['devices']:
                         vrfIpDict[vrf['name']]['ips'].setdefault(ip['ip'], [])
                         vrfIpDict[vrf['name']]['ips'][ip['ip']].insert(0, (device['name'], intname))
                         if len(vrfIpDict[vrf['name']]['ips'][ip['ip']]) > 2:
-                            # how to remove fhrp from violations?
-                            # is greater than 2 enough?
                             # Note - not verifiying both in same fhrp peering
                             v.insert(0, {'ip': ip['ip'], 'vrf': vrf['name'],
                                      'locations': vrfIpDict[vrf['name']]['ips'][ip['ip']]})
